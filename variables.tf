@@ -10,7 +10,7 @@ variable "region" {
 variable "cluster_name" {
   description = "Cluster name"
   type = string
-  default = "deploy-eks-test-6"
+  default = "deploy-eks-test-7"
 }
 
 variable "instance_type" {
@@ -22,7 +22,7 @@ variable "instance_type" {
 variable "min_size" {
   description = "Min number of nodes"
   type = number
-  default = 1
+  default = 2
 }
 
 variable "max_size" {
