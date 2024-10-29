@@ -137,6 +137,7 @@ resource "aws_eks_addon" "ebs-csi" {
     "eks_addon" = "ebs-csi"
     "terraform" = "true"
   }
+  depends_on = [module.eks]
   }
 resource "aws_eks_addon" "kube-proxy" {
   cluster_name             = module.eks.cluster_name
@@ -147,6 +148,7 @@ resource "aws_eks_addon" "kube-proxy" {
     "eks_addon" = "kube-proxy"
     "terraform" = "true"
   }
+  depends_on = [module.eks]
   }
 resource "aws_eks_addon" "vpc-cni" {
   cluster_name             = module.eks.cluster_name
@@ -157,6 +159,7 @@ resource "aws_eks_addon" "vpc-cni" {
     "eks_addon" = "vpc-cni"
     "terraform" = "true"
   }
+  depends_on = [module.eks]
   }
 resource "aws_eks_addon" "coredns" {
   cluster_name             = module.eks.cluster_name
