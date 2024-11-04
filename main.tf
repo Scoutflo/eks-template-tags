@@ -90,7 +90,7 @@ module "eks" {
     one = {
       name = "node-group-1"
 
-      instance_types = [local.instance_type]
+      instance_types = ["local.instance_type"]
 
       min_size     = local.min_size
       max_size     = local.max_size
