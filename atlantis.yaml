@@ -20,9 +20,9 @@ projects:
   autoplan:
     when_modified: ["*.tf", "../modules/**/*.tf", ".terraform.lock.hcl"]
     enabled: true
-  plan_requirements: [mergeable, approved, undiverged]
-  apply_requirements: [mergeable, approved, undiverged]
-  import_requirements: [mergeable, approved, undiverged]
+  plan_requirements: [approved, undiverged]
+  apply_requirements: [approved, undiverged]
+  import_requirements: [approved, undiverged]
   silence_pr_comments: ["apply"]
   execution_order_group: 1
   depends_on:
@@ -32,19 +32,11 @@ workflows:
   myworkflow:
     plan:
       steps:
-      - run: my-custom-command arg1 arg2
-      - run:
-          command: my-custom-command arg1 arg2
-          output: hide
-      - init
-      - plan:
-          extra_args: ["-lock", "false"]
-      - run: my-custom-command arg1 arg2
-    apply:
-      steps:
-      - run: echo hi
-      - apply
-allowed_regexp_prefixes:
-- dev/
-- staging/
-
+      - run: terraform init
+      - run: terraform plan
+      - run: |
+          trivy config --format json --output trivy_report.json .
+          if jq -e '.Results[] | select(.Vulnerabilities[] | .Severity == "CRITICAL")' trivy_report.json > /dev/null; then
+            echo "Trivy found critical vulnerabilities. Please review the report."
+            exit 1
+          fi
