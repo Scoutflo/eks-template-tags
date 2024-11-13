@@ -20,9 +20,9 @@ projects:
   autoplan:
     when_modified: ["*.tf", "../modules/**/*.tf", ".terraform.lock.hcl"]
     enabled: true
-  plan_requirements: [approved, undiverged]
-  apply_requirements: [approved, undiverged]
-  import_requirements: [approved, undiverged]
+  plan_requirements: [undiverged]
+  apply_requirements: [undiverged]
+  import_requirements: [undiverged]
   silence_pr_comments: ["apply"]
   execution_order_group: 1
   depends_on:
