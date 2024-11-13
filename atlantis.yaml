@@ -13,7 +13,6 @@ projects:
   workspace: default
   terraform_version: v0.11.0
   delete_source_branch_on_merge: true
-  repo_locking: true # deprecated: use repo_locks instead
   repo_locks:
     mode: on_plan
   custom_policy_check: false
@@ -25,18 +24,43 @@ projects:
   import_requirements: [undiverged]
   silence_pr_comments: ["apply"]
   execution_order_group: 1
-  depends_on:
-    - project-1
   workflow: myworkflow
 workflows:
   myworkflow:
     plan:
       steps:
-      - run: terraform init
-      - run: terraform plan
-      - run: |
-          trivy config --format json --output trivy_report.json .
-          if jq -e '.Results[] | select(.Vulnerabilities[] | .Severity == "CRITICAL")' trivy_report.json > /dev/null; then
-            echo "Trivy found critical vulnerabilities. Please review the report."
-            exit 1
-          fi
+        - run: |
+            echo "Running Terraform Plan"
+            terraform plan -out=tfplan
+
+        - run: |
+            echo "Converting Terraform Plan to JSON"
+            terraform show -json tfplan > plan.json
+
+        - run: |
+            echo "Running Trivy scan on Terraform Plan JSON"
+            trivy config --severity HIGH,CRITICAL --exit-code 1 --format json --output trivy-results.plan.json plan.json
+            
+        - run: |
+            echo "Checking Trivy scan results for critical issues"
+            CRITICAL_ISSUES=$(jq '. | select(.[] | .Severity == "CRITICAL") | length' trivy-results.tf.json)
+            PLAN_CRITICAL_ISSUES=$(jq '. | select(.[] | .Severity == "CRITICAL") | length' trivy-results.plan.json)
+
+            if [ "$CRITICAL_ISSUES" -gt 0 ] || [ "$PLAN_CRITICAL_ISSUES" -gt 0 ]; then
+              echo "Critical issues found in scan results. Failing the plan."
+              exit 1
+            else
+              echo "No critical issues found. Proceeding to apply."
+            fi
+            
+        - run: |
+            echo "Uploading scan results"
+            cp trivy-results.tf.json /tmp/trivy-results-${BASE_BRANCH}.tf.json
+            cp trivy-results.plan.json /tmp/trivy-results-${BASE_BRANCH}.plan.json
+
+    apply:
+      steps:
+        - run: |
+            echo "Apply stage after Trivy scan"
+            # This step will only run if the previous step succeeded
+            terraform apply -auto-approve tfplan
