@@ -1,5 +1,5 @@
 version: 3
-automerge: true
+automerge: false
 autodiscover:
   mode: auto
 delete_source_branch_on_merge: true
@@ -20,8 +20,8 @@ projects:
     when_modified: ["*.tf", "../modules/**/*.tf", ".terraform.lock.hcl"]
     enabled: true
   plan_requirements: [undiverged]
-  apply_requirements: [undiverged]
-  import_requirements: [undiverged]
+  apply_requirements: [approved, mergeable, undiverged]
+  import_requirements: [approved, mergeable, undiverged]
   silence_pr_comments: ["apply"]
   execution_order_group: 1
   workflow: myworkflow
@@ -29,38 +29,96 @@ workflows:
   myworkflow:
     plan:
       steps:
-        - run: |
-            echo "Running Terraform Plan"
-            terraform plan -out=tfplan
+     - run: |
+        echo "Running Terraform Init"
+        terraform init
 
-        - run: |
-            echo "Converting Terraform Plan to JSON"
-            terraform show -json tfplan > plan.json
+     - run: |
+        echo "Running Terraform Plan"
+        terraform plan -out=tfplan
 
-        - run: |
-            echo "Running Trivy scan on Terraform Plan JSON"
-            trivy config --severity HIGH,CRITICAL --exit-code 1 --format json --output trivy-results.plan.json plan.json
-            
-        - run: |
-            echo "Checking Trivy scan results for critical issues"
-            CRITICAL_ISSUES=$(jq '. | select(.[] | .Severity == "CRITICAL") | length' trivy-results.tf.json)
-            PLAN_CRITICAL_ISSUES=$(jq '. | select(.[] | .Severity == "CRITICAL") | length' trivy-results.plan.json)
+    - run: |
+        echo "Converting Terraform Plan to JSON"
+        terraform show -json tfplan > plan.json
 
-            if [ "$CRITICAL_ISSUES" -gt 0 ] || [ "$PLAN_CRITICAL_ISSUES" -gt 0 ]; then
-              echo "Critical issues found in scan results. Failing the plan."
-              exit 1
-            else
-              echo "No critical issues found. Proceeding to apply."
-            fi
-            
-        - run: |
-            echo "Uploading scan results"
-            cp trivy-results.tf.json /tmp/trivy-results-${BASE_BRANCH}.tf.json
-            cp trivy-results.plan.json /tmp/trivy-results-${BASE_BRANCH}.plan.json
+    - run: |
+        echo "Creating Trivy Scan Job"
+        cat << EOF > trivy-job.yaml
+        apiVersion: batch/v1
+        kind: Job
+        metadata:
+          name: trivy-scan-${ATLANTIS_REPO_NAME}-${ATLANTIS_PULL_NUM}
+        spec:
+          template:
+            spec:
+              containers:
+              - name: trivy
+                image: aquasec/trivy:latest
+                command: 
+                - trivy
+                - config
+                - --format=json
+                - --output=/results/trivy-results.json
+                - /tfplan/plan.json
+                volumeMounts:
+                - name: tfplan
+                  mountPath: /tfplan
+                - name: results
+                  mountPath: /results
+              volumes:
+              - name: tfplan
+                configMap:
+                  name: tfplan-${ATLANTIS_REPO_NAME}-${ATLANTIS_PULL_NUM}
+              - name: results
+                emptyDir: {}
+              restartPolicy: Never
+          backoffLimit: 0
+        EOF
 
-    apply:
-      steps:
-        - run: |
-            echo "Apply stage after Trivy scan"
-            # This step will only run if the previous step succeeded
-            terraform apply -auto-approve tfplan
+    - run: |
+        echo "Creating ConfigMap with Terraform Plan JSON"
+        kubectl create configmap tfplan-${ATLANTIS_REPO_NAME}-${ATLANTIS_PULL_NUM} --from-file=plan.json
+
+    - run: |
+        echo "Applying Trivy Scan Job"
+        kubectl apply -f trivy-job.yaml
+        
+    - run: |
+        echo "Waiting for Trivy Scan Job to complete"
+        kubectl wait --for=condition=complete job/trivy-scan-${ATLANTIS_REPO_NAME}-${ATLANTIS_PULL_NUM} --timeout=300s
+
+    - run: |
+        echo "Extracting Trivy Scan Results"
+        kubectl cp trivy-scan-${ATLANTIS_REPO_NAME}-${ATLANTIS_PULL_NUM}:/results/trivy-results.json ./trivy-results.json
+
+    - run: |
+        echo "Checking Trivy scan results for critical and high severity issues"
+        CRITICAL_ISSUES=$(jq '[.Results[].Vulnerabilities[] | select(.Severity == "CRITICAL")] | length' trivy-results.json)
+        HIGH_ISSUES=$(jq '[.Results[].Vulnerabilities[] | select(.Severity == "HIGH")] | length' trivy-results.json)
+        
+        if [ "$CRITICAL_ISSUES" -gt 0 ] || [ "$HIGH_ISSUES" -gt 0 ]; then
+          echo "Critical or high severity issues found in scan results."
+          echo "Critical Issues: $CRITICAL_ISSUES"
+          echo "High Issues: $HIGH_ISSUES"
+          exit 1
+        else
+          echo "No critical or high severity issues found. Proceeding to next steps."
+        fi
+
+    - run: |
+        echo "Uploading scan results to GitHub"
+        mkdir -p scan-results/${ATLANTIS_REPO_NAME}
+        cp trivy-results.json scan-results/${ATLANTIS_REPO_NAME}/trivy-results-${ATLANTIS_PULL_NUM}.json
+        
+        git config user.name "Atlantis Bot"
+        git config user.email "atlantis-bot@example.com"
+        git add scan-results/${ATLANTIS_REPO_NAME}/trivy-results-${ATLANTIS_PULL_NUM}.json
+        git commit -m "Add Trivy scan results for PR ${ATLANTIS_PULL_NUM}"
+        git push
+
+apply:
+  steps:
+    - run: |
+        echo "Apply stage after Trivy scan"
+        # This step will only run if the previous steps (including Trivy scan) succeeded
+        terraform apply -auto-approve tfplan
