@@ -10,7 +10,7 @@ variable "region" {
 variable "cluster_name" {
   description = "Cluster name"
   type = string
-  default = "ingresstesting-1"
+  default = "tagtesting1"
 }
 
 variable "instance_type" {
@@ -22,7 +22,7 @@ variable "instance_type" {
 variable "min_size" {
   description = "Min number of nodes"
   type = number
-  default = 2
+  default = 1
 }
 
 variable "max_size" {
